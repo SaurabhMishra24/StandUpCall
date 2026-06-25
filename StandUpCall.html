@@ -466,7 +466,9 @@ async function syncSheets(){
       ]);
     }
   });
-  rows.push(["", "", "", "", ""]); // Empty spacing row
+  rows.push(["", "", "", "", ""]); // Empty spacing row 1
+  rows.push(["", "", "", "", ""]); // Empty spacing row 2
+  rows.push(["", "", "", "", ""]); // Empty spacing row 3
   
   try {
     const res = await fetch(state.sheetsUrl, {
