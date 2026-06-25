@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Daily Standup Manager</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f5; color: #111; min-height: 100vh; padding: 1rem; }
+  .wrap { max-width: 620px; margin: 0 auto; }
+  h1 { font-size: 18px; font-weight: 500; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: #666; margin-bottom: 1.25rem; }
+  .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 1.25rem; margin-bottom: 0.75rem; }
+  label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+  textarea, input[type=url], input[type=text] { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 8px 10px; font-size: 14px; font-family: inherit; resize: vertical; }
+  textarea:focus, input:focus { outline: 2px solid #534AB7; outline-offset: 1px; }
+  button { border: 1px solid #ccc; background: #fff; border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; font-family: inherit; }
+  button:hover { background: #f0f0f0; }
+  button.primary { background: #534AB7; color: #fff; border-color: #534AB7; font-weight: 500; }
+  button.primary:hover { background: #3C3489; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .progress { display: flex; gap: 3px; margin-bottom: 1rem; }
+  .pbar { flex: 1; height: 4px; border-radius: 2px; background: #e0e0e0; }
+  .pbar.done { background: #1D9E75; }
+  .pbar.active { background: #534AB7; }
+  .avatar { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 500; font-size: 15px; flex-shrink: 0; }
+  .member-row { display: flex; align-items: center; gap: 10px; margin-bottom: 1rem; }
+  .stat-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 1rem; }
+  .stat { background: #f5f5f5; border-radius: 8px; padding: 0.75rem; text-align: center; }
+  .stat-num { font-size: 22px; font-weight: 500; }
+  .stat-lbl { font-size: 12px; color: #666; }
+  .msg { margin-top: 8px; font-size: 13px; }
+  .msg.ok { color: #0F6E56; }
+  .msg.err { color: #A32D2D; }
+  pre { font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-word; line-height: 1.7; background: #f5f5f5; border-radius: 8px; padding: 1rem; }
+  .absent-check { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #555; margin-bottom: 1rem; cursor: pointer; }
+  .field { margin-bottom: 0.75rem; }
+  .sunday { text-align: center; padding: 3rem 1rem; }
+  .avatars { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-bottom: 1.25rem; }
+  .av-item { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .av-name { font-size: 11px; color: #666; max-width: 56px; text-align: center; word-break: break-word; }
+  details summary { cursor: pointer; font-size: 13px; color: #534AB7; margin-bottom: 8px; }
+  .setup-steps { font-size: 13px; color: #555; line-height: 2; padding-left: 1.2rem; margin-bottom: 12px; }
+  .empty { text-align: center; padding: 2rem; }
+  .empty-icon { font-size: 2rem; margin-bottom: 12px; }
+  .member-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.06);
+    border-color: #534AB7 !important;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="app"></div>
+</div>
+
+<script>
+const AC = ["#CECBF6","#9FE1CB","#F5C4B3","#F4C0D1","#B5D4F4","#C0DD97","#FAC775","#F7C1C1","#B4B2A9","#5DCAA5"];
+const AT = ["#3C3489","#0F6E56","#993C1D","#993556","#185FA5","#3B6D11","#854F0B","#A32D2D","#5F5E5A","#0F6E56"];
+
+function initials(n){ return n.split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2); }
+function todayStr(){ return new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"short",day:"numeric"}); }
+function isSunday(){ return new Date().getDay()===0; }
+
+const SCRIPT = `function doPost(e) {
+  var lock = LockService.getScriptLock();
+  lock.tryLock(10000);
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+    var data = JSON.parse(e.postData.contents);
+    data.rows.forEach(function(row){
+      if (!row || row.length === 0) return;
+      var lastRow = sheet.getLastRow();
+      sheet.appendRow(row);
+      if (row.length > 0) {
+        if (row[0].indexOf("📅") > -1) {
+          sheet.getRange(lastRow + 1, 1, 1, 5).setFontWeight("bold").setBackground("#E2E8F0");
+        } else if (row[0] === "Name") {
+          sheet.getRange(lastRow + 1, 1, 1, 5).setFontWeight("bold").setBackground("#EDF2F7");
+        }
+      }
+    });
+    SpreadsheetApp.flush();
+    lock.releaseLock();
+    return makeResponse({ status: "ok" });
+  } catch(err) {
+    lock.releaseLock();
+    return makeResponse({ status: "error", message: err.message });
+  }
+}
+function doGet(e) {
+  return makeResponse({ status: "ok", message: "Script is live!" });
+}
+function makeResponse(obj) {
+  var o = ContentService.createTextOutput(JSON.stringify(obj));
+  o.setMimeType(ContentService.MimeType.JSON);
+  return o;
+}`;
+
+let state = {
+  members: JSON.parse(localStorage.getItem("sm_members") || "[]"),
+  sheetsUrl: localStorage.getItem("sm_url") || "",
+  screen: "home", // home | form | done
+  current: 0,
+  standups: {},
+  form: { yesterday:"", today:"", blocker:"", priority:"Low", absent:false },
+  showReport: false,
+  syncMsg: "",
+  syncing: false
+};
+
+function save(){ localStorage.setItem("sm_members", JSON.stringify(state.members)); }
+function saveUrl(){ localStorage.setItem("sm_url", state.sheetsUrl); }
+
+function render(){
+  const app = document.getElementById("app");
+  if(isSunday()){ app.innerHTML = `<div class="sunday"><div style="font-size:48px">🌅</div><h2 style="font-weight:500;margin:12px 0 8px">It's Sunday!</h2><p style="color:#666">No standup today. Enjoy your day off.</p></div>`; return; }
+  app.innerHTML = buildHTML();
+  attachEvents();
+}
+
+function buildHTML(){
+  let h = `<h1>📋 Daily Standup</h1><p class="sub">📅 ${todayStr()} &nbsp;·&nbsp; ${state.members.length} members</p>`;
+  h += buildHeader();
+  if(state.screen==="home") h += buildHome();
+  else if(state.screen==="grid") h += buildGrid();
+  else if(state.screen==="form") h += buildForm();
+  else if(state.screen==="done") h += buildDone();
+  return h;
+}
+
+function buildHeader(){
+  return `<div class="row" style="margin-bottom:1rem">
+    <button onclick="openEditMembers()">👥 Edit members</button>
+    <button onclick="toggleSheets()">📊 Sheets setup</button>
+  </div>
+  <div id="edit-members-panel" style="display:none" class="card">
+    <p style="font-weight:500;margin-bottom:4px">Team members</p>
+    <p style="font-size:13px;color:#666;margin-bottom:8px">One name per line</p>
+    <textarea id="members-input" rows="8" placeholder="John Doe&#10;Jane Smith&#10;Raj Kumar">${state.members.join("\n")}</textarea>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" onclick="saveMembers()">Save</button>
+      <button onclick="closeEditMembers()">Cancel</button>
+    </div>
+  </div>
+  <div id="sheets-panel" style="display:none" class="card">
+    <p style="font-weight:500;margin-bottom:10px">Google Sheets connection</p>
+    <ol class="setup-steps">
+      <li>Open Google Sheet → <b>Extensions → Apps Script</b></li>
+      <li>Delete existing code, paste the script below</li>
+      <li>Click <b>Deploy → New deployment → Web App</b></li>
+      <li>Execute as: <b>Me</b> &nbsp;|&nbsp; Access: <b>Anyone</b></li>
+      <li>Copy the Web App URL and paste below</li>
+    </ol>
+    <details><summary>Show Apps Script code</summary>
+    <pre>${SCRIPT.replace(/</g,"&lt;")}</pre></details>
+    <div style="margin-top:10px">
+      <label>Web App URL</label>
+      <input type="url" id="sheets-url" value="${state.sheetsUrl}" placeholder="https://script.google.com/macros/s/..." />
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="primary" onclick="saveUrl()">Save URL</button>
+      <button onclick="closeSheets()">Close</button>
+    </div>
+  </div>`;
+}
+
+function buildHome(){
+  if(state.members.length===0) return `<div class="card empty">
+    <div class="empty-icon">👥</div>
+    <p style="font-weight:500;margin-bottom:6px">No team members yet</p>
+    <p style="font-size:13px;color:#666;margin-bottom:14px">Click "Edit members" to add your team</p>
+    <button class="primary" onclick="openEditMembers()">Add members</button>
+  </div>`;
+  let avs = state.members.map((m,i)=>`<div class="av-item"><div class="avatar" style="background:${AC[i%10]};color:${AT[i%10]}">${initials(m)}</div><span class="av-name">${m}</span></div>`).join("");
+  return `<div class="card" style="text-align:center">
+    <div class="avatars">${avs}</div>
+    <button class="primary" onclick="startStandup()" style="font-size:15px;padding:9px 30px">▶ Start standup</button>
+  </div>`;
+}
+
+function buildGrid(){
+  const cards = state.members.map((m, i) => {
+    const s = state.standups[m];
+    let statusText = "Pending";
+    let style = "border: 1px dashed #bbb; background: #fafafa;";
+    let badgeStyle = "background: #eee; color: #666;";
+    
+    if (s) {
+      if (s.absent) {
+        statusText = "Absent";
+        style = "border: 1px solid #F8B4B4; background: #FDF2F2;";
+        badgeStyle = "background: #F8D7DA; color: #842029;";
+      } else {
+        statusText = "Present";
+        style = "border: 1px solid #9FE1CB; background: #EAF9F5;";
+        badgeStyle = "background: #D1E7DD; color: #0F5132;";
+      }
+    }
+    
+    return `<div class="member-card" style="padding: 1rem; border-radius: 10px; cursor: pointer; text-align: center; transition: all 0.2s; ${style}" onclick="openMemberForm(${i})">
+      <div class="avatar" style="margin: 0 auto 8px; background:${AC[i%10]}; color:${AT[i%10]}">${initials(m)}</div>
+      <div style="font-weight: 500; font-size: 14px; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${m}</div>
+      <span style="font-size: 10px; font-weight: bold; text-transform: uppercase; padding: 2px 8px; border-radius: 20px; ${badgeStyle}">${statusText}</span>
+    </div>`;
+  }).join("");
+
+  return `<div class="card" style="text-align:center;">
+    <p style="font-weight: 500; font-size: 15px; margin-bottom: 12px; text-align: left;">👥 Team Members Grid</p>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; margin-bottom: 1.5rem;">
+      ${cards}
+    </div>
+    <div class="row" style="justify-content: center;">
+      <button class="primary" style="padding: 9px 24px; font-size: 14px;" onclick="finishStandup()">Finish Standup ✓</button>
+      <button onclick="cancelStandup()">Cancel</button>
+    </div>
+  </div>`;
+}
+
+function openMemberForm(index){
+  state.screen = "form";
+  state.current = index;
+  const m = state.members[index];
+  state.form = state.standups[m] ? { ...state.standups[m] } : { yesterday:"", today:"", blocker:"", priority:"Low", absent:false };
+  render();
+}
+
+function cancelToGrid(){
+  state.screen = "grid";
+  render();
+}
+
+function buildForm(){
+  const m = state.members[state.current];
+  const i = state.current;
+  const bars = state.members.map((_,j)=>`<div class="pbar ${j<i?"done":j===i?"active":""}"></div>`).join("");
+  const f = state.form;
+  const fields = f.absent ? "" : `
+    <div class="field"><label>✅ What was done yesterday?</label><textarea rows="2" id="f-yes" placeholder="Type here...">${f.yesterday}</textarea></div>
+    <div class="field"><label>🎯 What is today's target?</label><textarea rows="2" id="f-tod" placeholder="Type here...">${f.today}</textarea></div>
+    <div class="field"><label>🚧 Any blocker?</label><textarea rows="2" id="f-blk" oninput="document.getElementById('blocker-priority-field').style.display=this.value.trim()?'block':'none'" placeholder="None / describe blocker...">${f.blocker}</textarea></div>
+    <div class="field" id="blocker-priority-field" style="display:${f.blocker.trim()?'block':'none'}">
+      <label>⚠️ Blocker Priority</label>
+      <div style="display:flex; gap:12px; margin-top:4px;">
+        <label style="display:inline-flex; align-items:center; gap:4px; font-size:13px; color:#555; cursor:pointer;">
+          <input type="radio" name="f-prio" value="Low" ${f.priority==="Low"||!f.priority?"checked":""}> Low (Grey)
+        </label>
+        <label style="display:inline-flex; align-items:center; gap:4px; font-size:13px; color:#555; cursor:pointer;">
+          <input type="radio" name="f-prio" value="Medium" ${f.priority==="Medium"?"checked":""}> Medium (Orange)
+        </label>
+        <label style="display:inline-flex; align-items:center; gap:4px; font-size:13px; color:#555; cursor:pointer;">
+          <input type="radio" name="f-prio" value="High" ${f.priority==="High"?"checked":""}> High (Red)
+        </label>
+      </div>
+    </div>`;
+
+  const cancelBtn = `<button onclick="cancelToGrid()">← Grid</button>`;
+  const saveGridBtn = `<button onclick="saveFormGrid()">Save & Grid</button>`;
+  const nextLbl = i+1<state.members.length ? "Save & Next →" : "Save & Grid";
+  const nextBtn = `<button class="primary" style="flex:1" onclick="saveFormNext()">${nextLbl}</button>`;
+
+  return `<div class="card">
+    <div class="progress">${bars}</div>
+    <p style="font-size:12px;color:#666;margin-bottom:6px">${i+1} of ${state.members.length}</p>
+    <div class="member-row" style="justify-content: space-between; align-items: center;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <div class="avatar" style="background:${AC[i%10]};color:${AT[i%10]}">${initials(m)}</div>
+        <h2 style="font-weight:500;font-size:18px">${m}</h2>
+      </div>
+      <div style="display: flex; gap: 6px;">
+        <button type="button" onclick="addMemberPrompt()" style="padding: 4px 8px; font-size: 11px; height: fit-content;">+ Add</button>
+        <button type="button" onclick="removeCurrentMember()" style="padding: 4px 8px; font-size: 11px; height: fit-content; color: #A32D2D; border-color: #F7C1C1;">Remove</button>
+      </div>
+    </div>
+    <label class="absent-check"><input type="checkbox" id="f-abs" ${f.absent?"checked":""} onchange="toggleAbsent(this)"> Mark as absent</label>
+    ${fields}
+    <div class="row" style="margin-top:1.25rem;">
+      ${cancelBtn}
+      ${saveGridBtn}
+      ${nextBtn}
+    </div>
+  </div>`;
+}
+
+function buildDone(){
+  const present = state.members.filter(m=>state.standups[m]&&!state.standups[m].absent).length;
+  const absent  = state.members.filter(m=>state.standups[m]&&state.standups[m].absent).length;
+  const blockers= state.members.filter(m=>state.standups[m]&&state.standups[m].blocker&&!state.standups[m].absent).length;
+  
+  const blockerList = state.members
+    .filter(m => state.standups[m] && !state.standups[m].absent && state.standups[m].blocker && state.standups[m].blocker.trim())
+    .map(m => {
+      const s = state.standups[m];
+      const prio = s.priority || "Low";
+      let bg = "#F2F2F2", text = "#555", border = "#E0E0E0";
+      if (prio === "High") { bg = "#FDF2F2"; text = "#9B1C1C"; border = "#F8B4B4"; }
+      else if (prio === "Medium") { bg = "#FFF8F1"; text = "#B25E00"; border = "#FFD8A8"; }
+      return `<div style="background:${bg}; color:${text}; border:1px solid ${border}; padding:8px 12px; border-radius:6px; margin-bottom:6px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
+        <span><strong>${m}</strong>: ${s.blocker}</span>
+        <span style="font-size:10px; font-weight:bold; text-transform:uppercase; padding:2px 6px; border-radius:4px; background:rgba(0,0,0,0.05);">${prio}</span>
+      </div>`;
+    }).join("");
+
+  const blockersSection = blockerList ? `<div style="margin-top:12px; margin-bottom:12px; text-align:left;">
+    <p style="font-size:12px; font-weight:500; color:#666; margin-bottom:6px;">🚧 Active Blockers:</p>
+    ${blockerList}
+  </div>` : "";
+
+  const reportHTML = state.showReport ? `<div class="card"><p style="font-size:14px;font-weight:500;margin-bottom:10px;color:#666">WhatsApp report preview</p><pre>${buildReport()}</pre></div>` : "";
+  const syncColor = state.syncMsg.startsWith("✅") ? "ok" : "err";
+  return `<div class="card">
+    <p style="font-weight:500;font-size:15px;margin-bottom:12px">✅ Standup complete!</p>
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-num">${present}</div><div class="stat-lbl">Present</div></div>
+      <div class="stat"><div class="stat-num">${absent}</div><div class="stat-lbl">Absent</div></div>
+      <div class="stat"><div class="stat-num">${blockers}</div><div class="stat-lbl">Blockers</div></div>
+    </div>
+    ${blockersSection}
+    <div class="row">
+      <button onclick="toggleReport()">📄 ${state.showReport?"Hide":"View"} report</button>
+      <button onclick="copyReport()">📋 Copy for WhatsApp</button>
+      <button onclick="syncSheets()" id="sync-btn" ${state.syncing?"disabled":""}>📊 ${state.syncing?"Syncing...":"Sync to Sheets"}</button>
+      <button onclick="restartStandup()">🔄 Restart</button>
+    </div>
+    ${state.syncMsg ? `<p class="msg ${syncColor}">${state.syncMsg}</p>` : ""}
+  </div>${reportHTML}`;
+}
+
+function buildReport(){
+  let msg = "📋 *Daily Standup Report*\n📅 " + todayStr() + "\n\n";
+  state.members.forEach((m,i)=>{
+    const s = state.standups[m];
+    if(!s) return;
+    msg += `*${i+1}. ${m}*\n`;
+    if(s.absent){ msg += "   🔴 Absent\n\n"; }
+    else {
+      msg += "   ✅ Yesterday: " + (s.yesterday||"—") + "\n";
+      msg += "   🎯 Today: " + (s.today||"—") + "\n";
+      let pEmoji = "⚪";
+      if(s.priority === "High") pEmoji = "🔴";
+      else if(s.priority === "Medium") pEmoji = "🟠";
+      msg += "   🚧 Blocker: " + (s.blocker ? `[${s.priority || "Low"}] ${s.blocker}` : "None") + "\n\n";
+    }
+  });
+  const al = state.members.filter(m=>state.standups[m]&&state.standups[m].absent);
+  if(al.length) msg += "*Absent:* " + al.join(", ") + "\n";
+  return msg;
+}
+
+function attachEvents(){}
+
+function openEditMembers(){ document.getElementById("edit-members-panel").style.display="block"; }
+function closeEditMembers(){ document.getElementById("edit-members-panel").style.display="none"; }
+function saveMembers(){
+  const val = document.getElementById("members-input").value;
+  state.members = val.split("\n").map(s=>s.trim()).filter(Boolean);
+  save(); closeEditMembers(); render();
+}
+function toggleSheets(){ const p=document.getElementById("sheets-panel"); p.style.display=p.style.display==="none"?"block":"none"; }
+function closeSheets(){ document.getElementById("sheets-panel").style.display="none"; }
+function saveUrl(){ state.sheetsUrl=document.getElementById("sheets-url").value.trim(); saveUrl_(); closeSheets(); alert("URL saved!"); }
+function saveUrl_(){ localStorage.setItem("sm_url", state.sheetsUrl); }
+
+function startStandup(){ state.screen="grid"; state.current=0; state.standups={}; state.form={yesterday:"",today:"",blocker:"",priority:"Low",absent:false}; render(); }
+function restartStandup(){ state.screen="home"; state.showReport=false; state.syncMsg=""; render(); }
+function cancelStandup(){ if(confirm("Are you sure you want to cancel? Progress on this session will be lost.")){ state.screen="home"; render(); } }
+
+function toggleAbsent(cb){ state.form.absent=cb.checked; render(); }
+
+function addMemberPrompt(){
+  let name = prompt("Enter new team member name:");
+  if(name && name.trim()){
+    state.members.push(name.trim());
+    save();
+    render();
+  }
+}
+
+function removeCurrentMember(){
+  const m = state.members[state.current];
+  if(confirm(`Are you sure you want to remove ${m} from this standup call and the team list?`)){
+    state.members.splice(state.current, 1);
+    delete state.standups[m];
+    save();
+    if(state.members.length === 0){
+      state.screen = "home";
+    } else {
+      state.screen = "grid";
+    }
+    render();
+  }
+}
+
+function collectForm(){
+  if(!state.form.absent){
+    state.form.yesterday = (document.getElementById("f-yes")||{value:""}).value;
+    state.form.today     = (document.getElementById("f-tod")||{value:""}).value;
+    state.form.blocker   = (document.getElementById("f-blk")||{value:""}).value;
+    const prioEl = document.querySelector('input[name="f-prio"]:checked');
+    state.form.priority  = prioEl ? prioEl.value : "Low";
+  }
+}
+
+function saveFormGrid(){
+  collectForm();
+  const m = state.members[state.current];
+  state.standups[m] = state.form.absent
+    ? {absent:true,yesterday:"",today:"",blocker:"",priority:""}
+    : {absent:false,...state.form};
+  state.screen = "grid";
+  render();
+}
+
+function saveFormNext(){
+  collectForm();
+  const m = state.members[state.current];
+  state.standups[m] = state.form.absent
+    ? {absent:true,yesterday:"",today:"",blocker:"",priority:""}
+    : {absent:false,...state.form};
+  
+  if(state.current+1 < state.members.length){
+    state.current++;
+    const nextM = state.members[state.current];
+    state.form = state.standups[nextM] ? { ...state.standups[nextM] } : {yesterday:"",today:"",blocker:"",priority:"Low",absent:false};
+    render();
+  } else {
+    state.screen = "grid";
+    render();
+  }
+}
+
+function finishStandup(){
+  state.members.forEach(m => {
+    if(!state.standups[m]){
+      state.standups[m] = {absent:true,yesterday:"",today:"",blocker:"",priority:""};
+    }
+  });
+  state.screen = "done";
+  render();
+}
+
+function toggleReport(){ state.showReport=!state.showReport; render(); }
+function copyReport(){ navigator.clipboard.writeText(buildReport()).then(()=>alert("Copied to clipboard!")); }
+
+async function syncSheets(){
+  if(!state.sheetsUrl){ alert("Please enter your Google Sheets Web App URL in Sheets setup first."); return; }
+  state.syncing=true; state.syncMsg=""; render();
+  
+  const rows = [];
+  rows.push(["📅 Daily Standup - " + todayStr(), "", "", "", ""]);
+  rows.push(["Name", "Target Yesterday", "Target Today", "Blocker", "Priority"]);
+  
+  state.members.forEach(m => {
+    const s = state.standups[m] || {};
+    if(s.absent){
+      rows.push([m, "Absent", "Absent", "Absent", ""]);
+    } else {
+      rows.push([
+        m,
+        s.yesterday || "",
+        s.today || "",
+        s.blocker || "",
+        s.blocker && s.blocker.trim() ? (s.priority || "Low") : ""
+      ]);
+    }
+  });
+  rows.push(["", "", "", "", ""]); // Empty spacing row
+  
+  try {
+    const res = await fetch(state.sheetsUrl, {
+      method:"POST",
+      body: JSON.stringify({rows})
+    });
+    const text = await res.text();
+    let json; try{ json=JSON.parse(text); }catch(e){ json=null; }
+    state.syncMsg = (json&&json.status==="ok") ? "✅ Data synced to Google Sheets!" : "❌ " + (json&&json.message ? json.message : text||"Unknown error");
+  } catch(e) {
+    state.syncMsg = "❌ " + e.message;
+  }
+  state.syncing=false; render();
+}
+
+render();
+</script>
+</body>
+</html>
