@@ -49,6 +49,49 @@
     box-shadow: 0 6px 16px rgba(0,0,0,0.06);
     border-color: #534AB7 !important;
   }
+  .polish-btn {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: #eef1f6;
+    color: #534AB7;
+    border: 1px solid #d0d7de;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .polish-btn:hover {
+    background: #e1e7f0;
+    border-color: #534AB7;
+  }
+  .polish-badge {
+    font-size: 11px;
+    color: #1D9E75;
+    font-weight: 500;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    margin-right: 8px;
+  }
+  .polish-badge.show {
+    opacity: 1;
+  }
+  .field-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .field-header label {
+    margin-bottom: 0;
+  }
+  .toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 12px;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -108,7 +151,8 @@ let state = {
   form: { yesterday:"", today:"", blocker:"", priority:"Low", absent:false },
   showReport: false,
   syncMsg: "",
-  syncing: false
+  syncing: false,
+  autocorrectEnabled: localStorage.getItem("sm_autocorrect") !== "false"
 };
 
 function save(){ localStorage.setItem("sm_members", JSON.stringify(state.members)); }
@@ -238,9 +282,36 @@ function buildForm(){
   const bars = state.members.map((_,j)=>`<div class="pbar ${j<i?"done":j===i?"active":""}"></div>`).join("");
   const f = state.form;
   const fields = f.absent ? "" : `
-    <div class="field"><label>✅ What was done yesterday?</label><textarea rows="2" id="f-yes" placeholder="Type here...">${f.yesterday}</textarea></div>
-    <div class="field"><label>🎯 What is today's target?</label><textarea rows="2" id="f-tod" placeholder="Type here...">${f.today}</textarea></div>
-    <div class="field"><label>🚧 Any blocker?</label><textarea rows="2" id="f-blk" oninput="document.getElementById('blocker-priority-field').style.display=this.value.trim()?'block':'none'" placeholder="None / describe blocker...">${f.blocker}</textarea></div>
+    <div class="field">
+      <div class="field-header">
+        <label>✅ What was done yesterday?</label>
+        <div>
+          <span class="polish-badge" id="badge-yes"></span>
+          <button type="button" class="polish-btn" onclick="triggerPolish('f-yes', 'badge-yes', this)">✨ Polish</button>
+        </div>
+      </div>
+      <textarea rows="2" id="f-yes" placeholder="Type here..." onkeyup="handleTypingAutocorrect(event, 'f-yes')">${f.yesterday}</textarea>
+    </div>
+    <div class="field">
+      <div class="field-header">
+        <label>🎯 What is today's target?</label>
+        <div>
+          <span class="polish-badge" id="badge-tod"></span>
+          <button type="button" class="polish-btn" onclick="triggerPolish('f-tod', 'badge-tod', this)">✨ Polish</button>
+        </div>
+      </div>
+      <textarea rows="2" id="f-tod" placeholder="Type here..." onkeyup="handleTypingAutocorrect(event, 'f-tod')">${f.today}</textarea>
+    </div>
+    <div class="field">
+      <div class="field-header">
+        <label>🚧 Any blocker?</label>
+        <div>
+          <span class="polish-badge" id="badge-blk"></span>
+          <button type="button" class="polish-btn" onclick="triggerPolish('f-blk', 'badge-blk', this)">✨ Polish</button>
+        </div>
+      </div>
+      <textarea rows="2" id="f-blk" oninput="document.getElementById('blocker-priority-field').style.display=this.value.trim()?'block':'none'" onkeyup="handleTypingAutocorrect(event, 'f-blk')" placeholder="None / describe blocker...">${f.blocker}</textarea>
+    </div>
     <div class="field" id="blocker-priority-field" style="display:${f.blocker.trim()?'block':'none'}">
       <label>⚠️ Blocker Priority</label>
       <div style="display:flex; gap:12px; margin-top:4px;">
@@ -274,7 +345,10 @@ function buildForm(){
         <button type="button" onclick="removeCurrentMember()" style="padding: 4px 8px; font-size: 11px; height: fit-content; color: #A32D2D; border-color: #F7C1C1;">Remove</button>
       </div>
     </div>
-    <label class="absent-check"><input type="checkbox" id="f-abs" ${f.absent?"checked":""} onchange="toggleAbsent(this)"> Mark as absent</label>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; flex-wrap:wrap; gap:8px;">
+      <label class="absent-check" style="margin-bottom:0;"><input type="checkbox" id="f-abs" ${f.absent?"checked":""} onchange="toggleAbsent(this)"> Mark as absent</label>
+      <label class="toggle-container" style="margin-bottom:0;"><input type="checkbox" id="f-auto-corr" ${state.autocorrectEnabled?"checked":""} onchange="toggleAutocorrect(this)"> ⚡ Auto-correct typos</label>
+    </div>
     ${fields}
     <div class="row" style="margin-top:1.25rem;">
       ${cancelBtn}
@@ -482,6 +556,209 @@ async function syncSheets(){
     state.syncMsg = "❌ " + e.message;
   }
   state.syncing=false; render();
+}
+
+const CORRECTION_DICT = {
+  "teh": "the",
+  "recieve": "receive",
+  "recieved": "received",
+  "recieving": "receiving",
+  "dont": "don't",
+  "cant": "can't",
+  "wont": "won't",
+  "im": "I'm",
+  "id": "I'd",
+  "ive": "I've",
+  "ill": "I'll",
+  "didnt": "didn't",
+  "wasnt": "wasn't",
+  "werent": "weren't",
+  "hasnt": "hasn't",
+  "havent": "haven't",
+  "hadnt": "hadn't",
+  "isnt": "isn't",
+  "arent": "aren't",
+  "couldnt": "couldn't",
+  "shouldnt": "shouldn't",
+  "wouldnt": "wouldn't",
+  "ther": "there",
+  "seperated": "separated",
+  "seperate": "separate",
+  "arguement": "argument",
+  "commited": "committed",
+  "coleague": "colleague",
+  "enviroment": "environment",
+  "goverment": "government",
+  "neccessary": "necessary",
+  "nescesary": "necessary",
+  "untill": "until",
+  "writeen": "written",
+  "writen": "written",
+  "relese": "release",
+  "develper": "developer",
+  "devloper": "developer",
+  "api": "API",
+  "db": "database",
+  "pr": "PR",
+  "ui": "UI",
+  "ux": "UX",
+  "poc": "PoC",
+  "wip": "WIP",
+  "qa": "QA",
+  "javascript": "JavaScript",
+  "js": "JS",
+  "github": "GitHub",
+  "gitlab": "GitLab",
+  "html": "HTML",
+  "css": "CSS",
+  "aws": "AWS",
+  "sql": "SQL",
+  "bugfix": "bug fix",
+  "hotfix": "hot fix"
+};
+
+function toggleAutocorrect(cb) {
+  state.autocorrectEnabled = cb.checked;
+  localStorage.setItem("sm_autocorrect", cb.checked ? "true" : "false");
+}
+
+function handleTypingAutocorrect(event, elementId) {
+  if (!state.autocorrectEnabled) return;
+  if (event.key === " " || event.key === "." || event.key === "," || event.key === "Enter") {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    const val = el.value;
+    const selectionStart = el.selectionStart;
+    const beforeCursor = val.slice(0, selectionStart);
+    const afterCursor = val.slice(selectionStart);
+    const words = beforeCursor.split(/(\s+|[,\.!?:;]+)/);
+    if (words.length < 2) return;
+    let wordToCorrectIndex = -1;
+    for (let j = words.length - 1; j >= 0; j--) {
+      if (words[j].trim() && !/^[,\.!?:;]+$/.test(words[j])) {
+        wordToCorrectIndex = j;
+        break;
+      }
+    }
+    if (wordToCorrectIndex !== -1) {
+      const word = words[wordToCorrectIndex];
+      const lowerWord = word.toLowerCase();
+      if (CORRECTION_DICT[lowerWord]) {
+        const replacement = CORRECTION_DICT[lowerWord];
+        let finalReplacement = replacement;
+        if (word === word.toUpperCase()) {
+          finalReplacement = replacement.toUpperCase();
+        } else if (word[0] === word[0].toUpperCase()) {
+          finalReplacement = replacement.charAt(0).toUpperCase() + replacement.slice(1);
+        }
+        words[wordToCorrectIndex] = finalReplacement;
+        const newBeforeCursor = words.join("");
+        el.value = newBeforeCursor + afterCursor;
+        const newCursorPos = newBeforeCursor.length;
+        el.setSelectionRange(newCursorPos, newCursorPos);
+        collectForm();
+      }
+    }
+  }
+}
+
+function polishSentence(text) {
+  if (!text || !text.trim()) return "";
+  text = text.replace(/\s+([,\.!?:;])/g, "$1");
+  text = text.replace(/([,\.!?:;])([A-Za-z0-9])/g, "$1 $2");
+  for (const [key, value] of Object.entries(CORRECTION_DICT)) {
+    const regex = new RegExp("\\b" + key + "\\b", "gi");
+    text = text.replace(regex, (match) => {
+      if (match === match.toUpperCase()) return value.toUpperCase();
+      if (match[0] === match[0].toUpperCase()) return value.charAt(0).toUpperCase() + value.slice(1);
+      return value;
+    });
+  }
+  text = text.replace(/\bi\b/g, "I");
+  text = text.replace(/\bi'm\b/g, "I'm");
+  text = text.replace(/\bi've\b/g, "I've");
+  text = text.replace(/\bi'll\b/g, "I'll");
+  text = text.replace(/\bi'd\b/g, "I'd");
+  text = text.replace(/(^\s*|[.!?]\s+)([a-z])/g, (match, prefix, char) => prefix + char.toUpperCase());
+  text = text.trim();
+  if (text && !/[.!?]$/.test(text)) {
+    text += ".";
+  }
+  return text;
+}
+
+async function polishSentenceLanguageTool(text) {
+  if (!text || !text.trim()) return text;
+  try {
+    const response = await fetch("https://api.languagetool.org/v2/check", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        text: text,
+        language: "en-US"
+      })
+    });
+    if (!response.ok) throw new Error("LanguageTool API error: " + response.status);
+    const data = await response.json();
+    if (data && data.matches && data.matches.length > 0) {
+      const matches = data.matches.sort((a, b) => b.offset - a.offset);
+      let polishedText = text;
+      for (const match of matches) {
+        if (match.replacements && match.replacements.length > 0) {
+          const replacement = match.replacements[0].value;
+          polishedText = polishedText.slice(0, match.offset) + replacement + polishedText.slice(match.offset + match.length);
+        }
+      }
+      return polishedText;
+    }
+    return text;
+  } catch (err) {
+    console.warn("LanguageTool API failed, falling back to local auto-correction:", err);
+    return polishSentence(text);
+  }
+}
+
+async function triggerPolish(textareaId, badgeId, buttonEl) {
+  const el = document.getElementById(textareaId);
+  if (!el) return;
+  const original = el.value;
+  if (!original.trim()) return;
+
+  const btn = buttonEl;
+  const badge = document.getElementById(badgeId);
+  
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Polishing...";
+  }
+
+  try {
+    const corrected = await polishSentenceLanguageTool(original);
+    if (original !== corrected) {
+      el.value = corrected;
+      collectForm();
+      if (badge) {
+        badge.textContent = "Polished! ✓";
+        badge.classList.add("show");
+        setTimeout(() => badge.classList.remove("show"), 2000);
+      }
+    } else {
+      if (badge) {
+        badge.textContent = "Already polished!";
+        badge.classList.add("show");
+        setTimeout(() => badge.classList.remove("show"), 2000);
+      }
+    }
+  } catch (e) {
+    console.error("Polishing error:", e);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "✨ Polish";
+    }
+  }
 }
 
 render();
